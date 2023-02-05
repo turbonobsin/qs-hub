@@ -1,0 +1,432 @@
+///main ver
+
+import fs = require("fs");
+import fsp = require("fs/promises");
+import crypto = require("crypto");
+import express = require("express");
+import http = require("http");
+import socket = require("socket.io");
+import readline = require("readline");
+import { stdin as input, stdout as output } from 'node:process';
+const rl = readline.createInterface({ input, output });
+
+// import siofu = require("socketio-file-upload");
+const app = express();
+const server = http.createServer(app);
+const io = new socket.Server(server);
+
+// app.use(siofu.router);
+app.use(express.static("../../frontend/out"));
+/*app.get("../",(req,res)=>{
+    res.send("<h1>Hello world</h1>");
+});*/
+server.listen(3000,()=>{
+    console.log("Server started on 3000");
+    ask();
+});
+
+class User{
+    constructor(uid:string,username:string,name:string,pass:string){
+        let t = this;
+        t.username = username;
+        t.name = name;
+        t.pass = pass;
+        if(uid == null) uid = crypto.randomUUID();
+        t.uid = uid;
+    }
+    username:string;
+    name:string;
+    pass:string;
+    uid:string;
+    sockets:string[] = [];
+    files:string[] = [];
+    fileNum = 0;
+    dateJoined:string = null;
+    lastOnline:string = null;
+    friends:string[] = [];
+    save(){
+        let t = this;
+        function write(){
+            fs.writeFile(`users/${t.username}/user.json`,JSON.stringify(t),{encoding:"utf8"},(err)=>{
+                if(err){
+                    console.log("Error writing file:",err);
+                    return;
+                }
+                // console.log(":user write successful");
+            });
+        }
+        users.set(t.username,t);
+        fs.stat("users/"+t.username,(err,stats)=>{
+            if(err){
+                fs.mkdir("users/"+t.username,(err)=>{
+                    if(err){
+                        console.log(err);
+                        return;
+                    }
+                    write();
+                });
+                return;
+            }
+            write();
+        });
+        if(false) fs.writeFile("users/"+this.username+".json",JSON.stringify(this),(err)=>{
+            if(err) console.log("ERR: saving user",err);
+        });
+    }
+}
+class ImgFile{
+    constructor(name:string,data:string,owner:string){
+        let t = this;
+        t.name = name;
+        t.data = data;
+        t.owner = owner;
+    }
+    name:string;
+    data:string;
+    owner:string;
+    views:number = 0;
+    likes:string[] = [];
+    tite:string = "";
+    desc:string = "";
+    comments:string[] = [];
+    save(){
+        let t = this;
+        fs.writeFile(`users/${userUids.get(this.owner)}/${this.name}.json`,JSON.stringify(this),{encoding:"utf8"},(err)=>{
+            if(err){
+                console.log("Err: saving imgFile: ",t.name);
+                return;
+            }
+            // console.log("successfully saved imgFile: ",t.name);
+        });
+    }
+}
+let userUids:Map<string,string> = new Map(); //<uid,username>
+let users:Map<string,User> = new Map();
+let sockets:Map<string,string> = new Map();
+
+async function init(){
+    /*let user = await getUser("Bobert");
+    if(!user){
+        user = new User(null,"Bobert","Bobby Boy","pass");
+        user.save();
+    }
+    console.log("Hello "+user.username+"!");*/
+    // users.set(user.uid,user);
+}
+
+async function stat(path:string){
+    return new Promise<fs.Stats>((resolve,reject)=>{
+        fs.stat(path,(err,stats)=>{
+            if(err) reject("Failed");
+            else resolve(stats);
+        });
+    });
+}
+async function read(path:string){
+    return new Promise<string>((resolve,reject)=>{
+        fs.readFile(path,{encoding:"utf8"},(err,data)=>{
+            if(err) reject("Failed");
+            else resolve(data);
+        });
+    });
+}
+
+async function getUser(username:string){
+    let user = users.get(username);
+    if(!user){
+        let path = `users/${username}`;
+        let res = await stat(path).catch(()=>{});
+        if(!res) return null;
+        let file = await read(path+"/user.json").catch(()=>{});
+        if(!file) return null;
+        let data:User = JSON.parse(file);
+        let us = new User(data.uid,username,data.name,data.pass);
+        let ok = Object.keys(data);
+        for(const key of ok){
+            if(data[key]) us[key] = data[key];
+        }
+        // console.log("USER LOADED:",us);
+        users.set(username,us);
+        userUids.set(us.uid,username);
+        us.files = data.files;
+        us.fileNum = data.fileNum;
+        us.sockets = [];
+        return users.get(username);
+    }
+    return user;
+}
+
+function writeUsers(){
+    let ar:any = {};
+    for(const [k,v] of users){
+        ar[k] = v;
+    }
+
+    fs.writeFile("users.json",JSON.stringify(ar),(err)=>{
+        console.log("ERR: ",err);
+    });
+}
+function readUsers(){
+    // fs.readFile("users.json")
+}
+
+init();
+
+io.on("connection",socket=>{
+    socket.on("msg",txt=>{
+        console.log("MSG: ",txt);
+    });
+    socket.on("createUser",async (username:string,name:string,pass:string,res:(err:string)=>void)=>{
+        let user = await getUser(username);
+        if(user){
+            res("Username taken");
+            return;
+        }
+        user = new User(null,username,name,pass);
+        user.dateJoined = Date();
+        user.lastOnline = user.dateJoined;
+        user.save();
+        res(null);
+    });
+    socket.on("logIn",async (username,pass,res:(err:string,id:number)=>void)=>{
+        let user = await getUser(username);
+        if(!user){
+            res("No user found with that username",0);
+            return;
+        }
+        if(user.sockets.includes(socket.id)){
+            res("Already signed in",-1);
+            return;
+        }
+        if(user.pass != pass){
+            res("Password incorrect",1);
+            return;
+        }
+        user.sockets.push(socket.id);
+        sockets.set(socket.id,user.username);
+        res(null,-1);
+        socket.emit("loadUser",JSON.stringify(user));
+    });
+    socket.on("logOut",async ()=>{
+        let username = sockets.get(socket.id);
+        if(username != null){
+            let user = await getUser(username);
+            user.sockets.splice(user.sockets.indexOf(socket.id),1);
+            sockets.delete(socket.id);
+            socket.emit("loadUser",null);
+        }
+    });
+    socket.on("disconnect",async ()=>{
+        let username = sockets.get(socket.id);
+        if(username != null){
+            let user = await getUser(username);
+            user.sockets.splice(user.sockets.indexOf(socket.id),1);
+            sockets.delete(socket.id);
+            user.lastOnline = Date();
+            user.save();
+        }
+    });
+    socket.on("uploadPNG",(name:string,data:string)=>{
+        if(!name) return;
+        if(!data) return;
+        // console.log("SAVING FILE: ",name,data);
+        fs.writeFile(name,data,(err)=>{
+            if(err) throw err;
+            // console.log("saved png");
+        });
+    });
+    async function getFileData(username:string,fileName:string,call:(data:string)=>void){
+        if(!call) return;
+        let fileUser = await getUser(username);
+        if(!fileUser){
+            console.log("Can't find username");
+            return;
+        }
+        // let fileName = fileUser.files[num];
+        if(!fileName){
+            console.log("Can't find filename: ",fileName,fileUser.files);
+            return;
+        }
+        // fileName = fileName.split(":")[1];
+        fs.readFile("users/"+username+"/"+fileName+".json",{
+            encoding:"utf8"
+        },(err,data)=>{
+            if(err){
+                console.log("Can't find file:",username,fileName);
+                return;
+            }
+            let file:ImgFile = JSON.parse(data);
+            let dat = {};/*{
+                name:fileName,
+                owner:username,
+                data:file.data
+            };*/
+            let ok = Object.keys(file);
+            for(const key of ok){
+                dat[key] = file[key];
+            }
+            // console.log(Object.keys(dat));
+            call(JSON.stringify(dat));
+        });
+    }
+    socket.on("uploadFile",async (name:string,data:string,call:(data:string)=>void)=>{
+        if(!call) return;
+        let username = sockets.get(socket.id);
+        if(!username) return;
+        let user = await getUser(username);
+        if(!user) return;
+        // user.files.push(user.fileNum+":"+name);
+        if(!user.files.includes(name)){
+            user.files.push(name);
+            user.fileNum++;
+            user.save();
+        }
+        let file = new ImgFile(name,data,user.uid);
+        fs.writeFile("users/"+username+"/"+name+".json",JSON.stringify(file),{
+            encoding:"utf8"
+        },(err)=>{
+            if(err) throw err;
+            getFileData(username,name,call);
+            // call();
+            // console.log(":uploaded nbg successfully: "+name);
+        });
+    });
+    socket.on("getFile",async (username:string,fileName:string,call:(data:string)=>void)=>{
+        if(!call) return;
+        // let name = sockets.get(socket.id);
+        // let user = await getUser(name);
+
+        getFileData(username,fileName,call);
+    });
+    socket.on("getUserData",async (username:string,load:(data:string)=>void)=>{
+        if(!load) return;
+        // let name = sockets.get(socket.id);
+        let name = username;
+        if(!name) return;
+        let user = await getUser(name);
+        if(!user) return;
+        let data = {
+            username:user.username,
+            name:user.name,
+            files:user.files
+        };
+        load(JSON.stringify(data));
+    });
+    socket.on("changeUsername",async (newName:string)=>{
+        return;
+        let name = sockets.get(socket.id);
+        if(!name) return;
+        let user = await getUser(name);
+        if(!user) return;
+        let stats = await stat("users/"+newName);
+        if(stats){
+            console.log("Err: can't change username, new username already taken");
+            return;
+        }
+        user.username = newName;
+        user.save();
+    });
+    socket.on("likeImage",async (uid:string,filename:string)=>{
+        let username = userUids.get(uid);
+        // if(username.startsWith("UID:")) username = userUids.get(username.split(":")[1]);
+        let name = sockets.get(socket.id);
+        if(!name) return;
+        let user = await getUser(name);
+        if(!user) return;
+        fs.readFile("users/"+username+"/"+filename+".json",{encoding:"utf8"},(err,data)=>{
+            if(err){
+                console.log("Err: Can't like, file not found");
+                return;
+            }
+            let jdata:ImgFile = JSON.parse(data);
+            let dat:ImgFile = new ImgFile(null,null,null);
+            let ok = Object.keys(jdata);
+            for(const key of ok){
+                dat[key] = jdata[key];
+            }
+            if(dat.likes.includes(name)){
+                // console.log("Can't like more than once!");
+                // return;
+                dat.likes.splice(dat.likes.indexOf(name),1);
+            }
+            else dat.likes.push(name);
+            dat.save();
+            socket.emit("updateImage",uid,filename,JSON.stringify(dat));
+            // console.log("LIKED IMAGE",username,filename,"...by...",name);
+        });
+    });
+    socket.on("deleteFile",async (filename:string,call:()=>void)=>{
+        let name = sockets.get(socket.id);
+        if(!name) return;
+        let user = await getUser(name);
+        if(!user) return;
+        if(!user.files.includes(filename)) return;
+        fs.rm("users/"+name+"/"+filename+".json",(err)=>{
+            if(err){
+                console.log("Failed to delete file: ",name,filename);
+                return;
+            }
+            user.files.splice(user.files.indexOf(filename),1);
+            user.save();
+            // console.log("Deleted file: ",filename," from ",name);
+            call();
+        });
+    });
+    socket.on("getUserProps",async (username,prop,call:(val:any)=>void)=>{
+        if(!call) return;
+        if(typeof call != "function") return;
+        let user:User = await getUser(username);
+        if(!user){
+            call(null);
+            return;
+        }
+        if(prop == "name") call(user.name);
+        if(prop == "exists") call(true);
+    });
+});
+class Command{
+    constructor(name:string,sig:string,run:(str:string[],resolve)=>Promise<void>){
+        this.name = name;
+        this.sig = sig;
+        this.run = run;
+    }
+    name:string;
+    sig:string;
+    run:(str:string[],resolve)=>Promise<void>;
+}
+let cmds = [
+    new Command("getuser","getuser %0",async function(str:string[],resolve){
+        let t:Command = this;
+        let user = await getUser(str[0]);
+        if(!user) console.log(`Err: User with username (${str[0]}) not found`);
+        else console.log(user);
+        resolve();
+    }),
+    new Command("cls","",async function(str:string[],resolve){
+        process.stdout.write('\u001B[2J\u001B[0;0f');
+        resolve();
+    }),
+    new Command("exit","",async function(str,resolve){
+        process.exit(0);
+    })
+];
+let closeServer = false;
+function ask(){
+    if(closeServer) return;
+    rl.question("> ",async (answer:string)=>{
+        let str = answer.split(" ");
+        let ran = false;
+        for(let cmd of cmds){
+            if(cmd.name == str[0].trim()){
+                str.splice(0,1);
+                await new Promise<void>(async (resolve,reject)=>{
+                    cmd.run(str,resolve);
+                });
+                ran = true;
+                break;
+            }
+        }
+        if(!ran) console.log("Err: invalid command");
+        ask();
+    });
+}

@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "module": "Node16",
+        "target": "ES2022",
+        "outDir": "out",
+        "rootDirs": [
+            "./src"
+        ]
+    },
+    "exclude": [
+        "node_modules"
+    ]
+}

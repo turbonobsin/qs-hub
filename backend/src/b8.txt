@@ -1,0 +1,624 @@
+///main ver
+
+import fs = require("fs");
+import fsp = require("fs/promises");
+import crypto = require("crypto");
+import express = require("express");
+import http = require("http");
+import socket = require("socket.io");
+import readline = require("readline");
+import { stdin as input, stdout as output } from 'node:process';
+const rl = readline.createInterface({ input, output });
+
+// import siofu = require("socketio-file-upload");
+const app = express();
+const server = http.createServer(app);
+const io = new socket.Server(server);
+
+// app.use(siofu.router);
+app.use(express.static("../../frontend/out"));
+/*app.get("../",(req,res)=>{
+    res.send("<h1>Hello world</h1>");
+});*/
+
+class Collection{
+    constructor(name:string,desc:string,arr:string[],pub:boolean){
+        let t = this;
+        t.name = name;
+        t.desc = desc;
+        t.arr = arr;
+        t.pub = pub;
+    }
+    name:string;
+    desc:string;
+    arr:string[];
+    pub:boolean;
+}
+class User{
+    constructor(uid:string,username:string,name:string,pass:string){
+        let t = this;
+        t.username = username;
+        t.name = name;
+        t.pass = pass;
+        // if(uid == null) uid = crypto.randomUUID();
+        if(uid == null){
+            core.userAmt++;
+            uid = core.userAmt.toString();
+            core.save();
+        }
+        t.uid = uid;
+    }
+    username:string;
+    name:string;
+    pass:string;
+    uid:string;
+    sockets:string[] = [];
+    files:string[] = [];
+    fileNum = 0;
+    dateJoined:string = null;
+    lastOnline:string = null;
+    friends:string[] = [];
+    collections:Collection[] = [new Collection("Public Files","These files are publically displayed to anyone.",[],true)];
+    likes:number[] = [];
+    publicLikes = false;
+    save(){
+        let t = this;
+        function write(){
+            fs.writeFile(`users/${t.uid}/user.json`,JSON.stringify(t),{encoding:"utf8"},(err)=>{
+                if(err){
+                    console.log("Error writing file:",err);
+                    return;
+                }
+                // console.log(":user write successful");
+            });
+        }
+        users.set(t.uid,t);
+        fs.stat("users/"+t.uid,(err,stats)=>{
+            if(err){
+                fs.mkdir("users/"+t.uid,(err)=>{
+                    if(err){
+                        console.log(err);
+                        return;
+                    }
+                    write();
+                });
+                return;
+            }
+            write();
+        });
+        if(false) fs.writeFile("users/"+this.username+".json",JSON.stringify(this),(err)=>{
+            if(err) console.log("ERR: saving user",err);
+        });
+    }
+}
+class ImgFile{
+    constructor(name:string,data:string,owner:string){
+        let t = this;
+        t.name = name;
+        t.data = data;
+        t.owner = owner;
+    }
+    name:string;
+    data:string;
+    owner:string;
+    views:number = 0;
+    likes:string[] = [];
+    tite:string = "";
+    desc:string = "";
+    comments:string[] = [];
+    id:number = -1;
+    save(){
+        let t = this;
+        fs.writeFile(`users/${this.owner}/${this.id}.json`,JSON.stringify(this),{encoding:"utf8"},(err)=>{
+            if(err){
+                console.log("Err: saving imgFile: ",t.name);
+                return;
+            }
+            // console.log("successfully saved imgFile: ",t.name);
+        });
+    }
+}
+// let usernameToUID:Map<string,string> = new Map(); //<username,uid>
+// let uidToUsername:Map<string,string> = new Map(); //<uid,username>
+let users:Map<string,User> = new Map(); //<uid,User>
+let sockets:Map<string,string> = new Map(); //<socket.id,uid>
+
+class Core{
+    constructor(){}
+    fileAmt = 0;
+    userAmt = 0;
+    users:{[k:string]:string};
+    usersName:{[k:string]:string} = {};
+    save(){
+        let tmp = core.usersName;
+        core.usersName = null;
+        let str = JSON.stringify(this);
+        console.log(str);
+        fs.writeFile("users/all.json",str,{encoding:"utf8"},(err)=>{
+            if(err){
+                console.log("ERR: Failed to save users");
+            }
+        });
+        core.usersName = tmp;
+    }
+}
+let core:Core = null;
+async function init(){
+    let coreStr = await read("users/all.json");
+    core = new Core();
+    let obj = JSON.parse(coreStr);
+    let ok = Object.keys(obj);
+    for(const key of ok){
+        if(obj[key]) core[key] = obj[key];
+    }
+
+    let ok2 = Object.keys(core.users);
+    for(const k of ok2){
+        core.usersName[core.users[k]] = k;
+    }
+
+    server.listen(3000,()=>{
+        console.log("Server started on 3000");
+        ask();
+    });
+}
+
+async function stat(path:string){
+    return new Promise<fs.Stats>((resolve,reject)=>{
+        fs.stat(path,(err,stats)=>{
+            if(err) reject("Failed");
+            else resolve(stats);
+        });
+    });
+}
+async function read(path:string){
+    return new Promise<string>(resolve=>{
+        fs.readFile(path,{encoding:"utf8"},(err,data)=>{
+            if(err) resolve(null);
+            else resolve(data);
+        });
+    });
+}
+
+async function getUser(uid:string){
+    let user = users.get(uid);
+    if(!user){
+        let path = `users/`+uid;
+        let res = await stat(path).catch(()=>{});
+        if(!res) return null;
+        let file = await read(path+"/user.json").catch(()=>{});
+        if(!file) return null;
+        let data:User = JSON.parse(file);
+        let us = new User(uid,data.username,data.name,data.pass);
+        let ok = Object.keys(data);
+        for(const key of ok){
+            if(data[key]) us[key] = data[key];
+        }
+        // USER LOADED
+        users.set(uid,us);
+        // uidToUsername.set(us.uid,us.username);
+        // usernameToUID.set(us.username,us.uid);
+        us.files = data.files;
+        us.fileNum = data.fileNum;
+        us.sockets = [];
+        us.save();
+        return users.get(uid);
+    }
+    return user;
+}
+
+function writeUsers(){
+    let ar:any = {};
+    for(const [k,v] of users){
+        ar[k] = v;
+    }
+
+    fs.writeFile("users.json",JSON.stringify(ar),(err)=>{
+        console.log("ERR: ",err);
+    });
+}
+function readUsers(){
+    // fs.readFile("users.json")
+}
+
+init();
+
+io.on("connection",socket=>{
+    socket.on("msg",txt=>{
+        console.log("MSG: ",txt);
+    });
+    socket.on("createUser",async (username:string,name:string,pass:string,res:(err:string)=>void)=>{
+        if(username.length > 30){
+            res("Username can't be longer than 30 characters");
+            return;
+        }
+        let allowedSym = "abcdefghijklmnopqrstuvwxyz_0123456789-";
+        for(let i = 0; i < username.length; i++){
+            if(!allowedSym.includes(username[i])){
+                res("Username can't contain the character: "+username[i]);
+                return;
+            }
+        }
+        // let user = await getUser(username);
+        let checkUsername = core.users[username];
+        if(checkUsername != null){
+            res("Username taken");
+            return;
+        }
+        let user = new User(null,username,name,pass);
+        user.dateJoined = Date();
+        user.lastOnline = user.dateJoined;
+        user.save();
+        core.users[user.username] = user.uid;
+        core.save();
+        res(null);
+    });
+    socket.on("logIn",async (username:string,pass:string,res:(err:string,id:number)=>void)=>{
+        let uid = core.users[username];
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user){
+            res("No user found with that username",0);
+            return;
+        }
+        if(user.sockets.includes(socket.id)){
+            res("Already signed in",-1);
+            return;
+        }
+        if(user.pass != pass){
+            res("Password incorrect",1);
+            return;
+        }
+        user.sockets.push(socket.id);
+        sockets.set(socket.id,user.uid);
+        res(null,-1);
+        socket.emit("loadUser",JSON.stringify(user));
+    });
+    socket.on("logOut",async ()=>{
+        let uid = sockets.get(socket.id);
+        if(uid != null){
+            let user = await getUser(uid);
+            user.sockets.splice(user.sockets.indexOf(socket.id),1);
+            sockets.delete(socket.id);
+            socket.emit("loadUser",null);
+        }
+    });
+    socket.on("disconnect",async ()=>{
+        let uid = sockets.get(socket.id);
+        if(uid != null){
+            let user = await getUser(uid);
+            if(!user) return;
+            user.sockets.splice(user.sockets.indexOf(socket.id),1);
+            sockets.delete(socket.id);
+            user.lastOnline = Date();
+            user.save();
+        }
+    });
+    socket.on("uploadPNG",(name:string,data:string)=>{
+        if(!name) return;
+        if(!data) return;
+        // console.log("SAVING FILE: ",name,data);
+        fs.writeFile(name,data,(err)=>{
+            if(err) throw err;
+            // console.log("saved png");
+        });
+    });
+    async function getFileData(uid:string,fileId:string,call:(data:string)=>void){
+        // console.log("GET FILE: ",uid,fileId);
+        if(!call) return;
+        let fileUser = await getUser(uid);
+        if(!fileUser){
+            console.log("Can't find user with that uid",uid);
+            return;
+        }
+        // let fileName = fileUser.files[num];
+        if(!fileId){
+            console.log("Can't find filename: ",fileId,fileUser.files);
+            return;
+        }
+        // fileName = fileName.split(":")[1];
+        fs.readFile("users/"+uid+"/"+fileId+".json",{
+            encoding:"utf8"
+        },(err,data)=>{
+            if(err){
+                console.log("Can't find file:",uid,fileId);
+                return;
+            }
+            let file:ImgFile = JSON.parse(data);
+            let dat = {};/*{
+                name:fileName,
+                owner:username,
+                data:file.data
+            };*/
+            let ok = Object.keys(file);
+            for(const key of ok){
+                dat[key] = file[key];
+            }
+            // console.log(Object.keys(dat));
+            call(JSON.stringify(dat));
+        });
+    }
+    socket.on("uploadFile",async (name:string,data:string,call:(data:string)=>void)=>{
+        if(!call) return;
+        let uid = sockets.get(socket.id);
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        console.log(222,user.name,name);
+        if(false) if(!user.files.includes(name)){
+            user.files.push(name);
+            user.fileNum++;
+            user.save();
+        }
+        core.fileAmt++;
+        let fileId = core.fileAmt;
+        user.files.push(fileId.toString());
+        user.fileNum++;
+        user.save();
+        let file = new ImgFile(name,data,user.uid);
+        // core.fileAmt++;
+        file.id = fileId;
+        core.save();
+        fs.writeFile("users/"+uid+"/"+file.id+".json",JSON.stringify(file),{
+            encoding:"utf8"
+        },(err)=>{
+            if(err) throw err;
+            getFileData(uid,file.id.toString(),call);
+            // call();
+            // console.log(":uploaded nbg successfully: "+name);
+        });
+    });
+    socket.on("getFileUsername",async (username:string,fileName:string,call:(data:string)=>void)=>{
+        if(!call) return;
+        // let uid = usernameToUID.get(username);
+        let uid = core.users[username];
+        if(!uid) return;
+        // let name = sockets.get(socket.id);
+        // let user = await getUser(name);
+
+        getFileData(uid,fileName,call);
+    });
+    socket.on("getFile",async (uid:string,fileId:string,call:(data:string)=>void)=>{
+        if(!call) return;
+        // let name = sockets.get(socket.id);
+        // let user = await getUser(name);
+
+        getFileData(uid,fileId,call);
+    });
+    socket.on("getUserData",async (username:string,load:(data:string)=>void)=>{
+        if(!username) return;
+        if(!load) return;
+        // let uid = usernameToUID.get(username);
+        let uid = core.users[username];
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        let data = {
+            username:user.username,
+            name:user.name,
+            files:user.files,
+            uid:user.uid
+        };
+        load(JSON.stringify(data));
+    });
+    socket.on("changeUsername",async (newName:string)=>{
+        return;
+        let name = sockets.get(socket.id);
+        if(!name) return;
+        let user = await getUser(name);
+        if(!user) return;
+        let stats = await stat("users/"+newName);
+        if(stats){
+            console.log("Err: can't change username, new username already taken");
+            return;
+        }
+        user.username = newName;
+        user.save();
+    });
+    socket.on("likeImage",async (uid:string,fileId:string)=>{
+        // let username = uidToUsername.get(uid);
+        // if(username.startsWith("UID:")) username = userUids.get(username.split(":")[1]);
+        let myUid = sockets.get(socket.id);
+        if(!myUid) return;
+        let user = await getUser(myUid);
+        if(!user) return;
+        fs.readFile("users/"+uid+"/"+fileId+".json",{encoding:"utf8"},(err,data)=>{
+            if(err){
+                console.log("Err: Can't like, file not found",uid,fileId);
+                return;
+            }
+            let jdata:ImgFile = JSON.parse(data);
+            let dat:ImgFile = new ImgFile(null,null,null);
+            let ok = Object.keys(jdata);
+            for(const key of ok){
+                dat[key] = jdata[key];
+            }
+            if(dat.likes.includes(myUid)){
+                // console.log("Can't like more than once!");
+                // return;
+                dat.likes.splice(dat.likes.indexOf(myUid),1);
+                user.likes.splice(user.likes.indexOf(dat.id),1);
+                // let ind = user.likes.indexOf(username+":"+filename);
+                // if(ind != -1) user.likes.splice(ind,1);
+            }
+            else{
+                dat.likes.push(myUid);
+                user.likes.push(dat.id);
+                // user.likes.push(username+":"+filename);
+            }
+            dat.save();
+            user.save();
+            socket.emit("updateImage",uid,fileId,JSON.stringify(dat));
+            // console.log("LIKED IMAGE",username,filename,"...by...",name);
+        });
+    });
+    socket.on("deleteFile",async (fileId:string,call:()=>void)=>{
+        if(fileId == null) return;
+        fileId = fileId.toString();
+        console.log("Deleting file: ",fileId);
+        let uid = sockets.get(socket.id);
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        if(!user.files.includes(fileId)){
+            console.log("ERR: user doesn't have file: ",fileId);
+            return;
+        }
+        fs.rm("users/"+uid+"/"+fileId+".json",(err)=>{
+            if(err){
+                console.log("Failed to delete file: ",uid,fileId);
+                return;
+            }
+            user.files.splice(user.files.indexOf(fileId),1);
+            user.save();
+            // console.log("Deleted file: ",filename," from ",name);
+            call();
+        });
+    });
+    socket.on("testUserProps",async (username,prop,call:(val:boolean)=>void)=>{
+        let suid = sockets.get(socket.id);
+        if(!call) return;
+        if(typeof call != "function") return;
+        let uid = core.users[username];
+        if(!uid){
+            call(null);
+            return;
+        }
+        let user:User = await getUser(uid);
+        if(!user){
+            call(null);
+            return;
+        }
+        if(prop == "likes"){
+            if(user.publicLikes || suid == user.uid) call(true);
+            else call(false);
+        }
+    });
+    socket.on("getUserProps",async (username,prop,call:(val:any)=>void)=>{
+        let suid = sockets.get(socket.id);
+        if(!call) return;
+        if(typeof call != "function") return;
+        // let uid = usernameToUID.get(username);
+        let uid = core.users[username];
+        if(!uid){
+            call(null);
+            return;
+        }
+        let user:User = await getUser(uid);
+        if(!user){
+            call(null);
+            return;
+        }
+        if(prop == "name") call(user.name);
+        else if(prop == "exists") call(true);
+        else if(prop == "likes"){
+            if(user.publicLikes || suid == user.uid) call(JSON.stringify(user.likes));
+            else call(null);
+        }
+        else if(prop == "colls"){
+            let l = [];
+            for(let i = 0; i < user.collections.length; i++){
+                let c = user.collections[i];
+                if(c.pub) l.push([i,c.name]);
+            }
+            call(JSON.stringify(l));
+        }
+    });
+    socket.on("newCollection",async (colName:string,desc:string)=>{
+        let uid = sockets.get(socket.id);
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        let col = new Collection(colName,desc,[],false);
+        user.collections.push(col);
+        user.save();
+    });
+});
+class Command{
+    constructor(name:string,sig:string,run:(str:string[],resolve)=>Promise<void>){
+        this.name = name;
+        this.sig = sig;
+        this.run = run;
+    }
+    name:string;
+    sig:string;
+    run:(str:string[],resolve)=>Promise<void>;
+}
+let cmds = [
+    new Command("getuser","getuser %0",async function(str:string[],resolve){
+        let t:Command = this;
+        // let uid = usernameToUID.get(str[0]);
+        let uid = core.users[str[0]];
+        if(str[0].startsWith("u")) uid = str[0].substring(1);
+        if(!uid){
+            console.log("ERR: no user at that username");
+            resolve();
+            return;
+        }
+        let user = await getUser(uid);
+        if(!user) console.log(`ERR: User with username (${str[0]}) not found`);
+        else console.log(user);
+        resolve();
+    }),
+    new Command("gettest","",async function(str:string[],res){
+        let s = parseInt(str[0]);
+        /*if(s == 0){
+            for(const [k,v] of usernameToUID){
+                console.log(k+" : ",v);
+            }
+        }
+        else if(s == 1){
+            for(const [k,v] of uidToUsername){
+                console.log(k+" : ",v);
+            }
+        }*/
+        if(s == 2){
+            for(const [k,v] of users){
+                console.log(k+" : ",v);
+            }
+        }
+        else if(s == 3){
+            let ok = Object.keys(core.users);
+            for(const k of ok){
+                console.log(k+" : ",core.users[k]);
+            }
+        }
+        else if(s == 4){
+            let ok = Object.keys(core.usersName);
+            for(const k of ok){
+                console.log(k+" : ",core.usersName[k]);
+            }
+        }
+        res();
+    }),
+    new Command("cls","",async function(str:string[],resolve){
+        process.stdout.write('\u001B[2J\u001B[0;0f');
+        resolve();
+    }),
+    new Command("exit","",async function(str,resolve){
+        process.exit(0);
+    })
+];
+let closeServer = false;
+function ask(){
+    if(closeServer) return;
+    rl.question("> ",async (answer:string)=>{
+        let str = answer.split(" ");
+        let ran = false;
+        for(let cmd of cmds){
+            if(cmd.name == str[0].trim()){
+                console.log("000");
+                str.splice(0,1);
+                console.log(111);
+                await new Promise<void>(async (resolve)=>{
+                    cmd.run(str,resolve);
+                });
+                console.log(222);
+                ran = true;
+                break;
+            }
+        }
+        if(!ran) console.log("Err: invalid command");
+        ask();
+    });
+}

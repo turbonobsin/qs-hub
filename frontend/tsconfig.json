@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "module": "CommonJS",
+        "outDir": "out",
+        "assumeChangesOnlyAffectDirectDependencies":true,
+        "target": "ES2022",
+        "rootDirs": [
+            "./src"
+        ],
+        "sourceMap": true,
+        "lib": [
+            "DOM",
+            "ES2022"
+        ]
+        // "esModuleInterop": true
+    },
+    "exclude": [
+        "node_modules"
+    ]
+    
+}
