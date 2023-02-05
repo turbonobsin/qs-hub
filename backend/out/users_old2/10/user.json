@@ -1,0 +1,24 @@
+{
+    "username": "bob7",
+    "name": "a",
+    "pass": "123",
+    "uid": "10",
+    "sockets": [],
+    "files": [],
+    "fileNum": 0,
+    "dateJoined": "Sat Feb 04 2023 12:07:34 GMT-0500 (Eastern Standard Time)",
+    "lastOnline": "Sat Feb 04 2023 12:07:34 GMT-0500 (Eastern Standard Time)",
+    "friends": [],
+    "collections": [
+        {
+            "name": "test",
+            "desc": "desc",
+            "arr": [
+                "5",
+                "3"
+            ]
+        }
+    ],
+    "likes": [],
+    "publicLikes": false
+}

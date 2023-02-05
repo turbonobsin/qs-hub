@@ -1,0 +1,14 @@
+{
+    "name": "Bobert.nbg",
+    "data": "Bobert.nbg,16,16,1,0,255,0,0,255\n0\n0000ff,ff0000\n@\nlayer\n0,0\nMain\n0:63,62,61,60,5k,5j,5i,5h,5g,5f,5e,5d,4x,4i,4h,42,3m,36,2q,2a,1u;1:4t,4s,4r,4q,4p,3u,3t,3s,3r,39,2x,2w,2v,2u,2t,2d,20,1z,1y,1x\ntrue\n@\n",
+    "owner": "1",
+    "views": [],
+    "likes": [],
+    "title": "Bob3",
+    "desc": "a new bob",
+    "comments": [],
+    "id": 20,
+    "speed": 8,
+    "delay": 0,
+    "pub": false
+}

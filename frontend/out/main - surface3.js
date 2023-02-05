@@ -1,0 +1,367 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const d_menus = document.getElementById("menuArea");
+const menu = document.getElementById("menu");
+const d_acc = document.getElementById("d_acc");
+const b_closeMenu = document.getElementById("b_closeMenu");
+const area = document.getElementById("area");
+const l_title = document.getElementById("l_title");
+const l_title2 = document.getElementById("l_title2");
+const l_name = document.getElementById("l_name");
+const m_acc = document.getElementById("m_acc");
+const title = "Quick Surface Hub";
+// @ts-ignore
+let socket = io();
+class OptionDiv {
+    constructor() { }
+    c = [];
+    d = null;
+}
+function EleHTML(e, html = [], append, ops = {}, on = null, title = null) {
+    let dd = new OptionDiv();
+    let d = document.createElement(e);
+    dd.d = d;
+    if (html instanceof Array)
+        for (let i = 0; i < html.length; i++) {
+            let s = html[i].split("^");
+            let chars = ["!", "@"];
+            let type = s[0];
+            for (let j = 0; j < chars.length; j++)
+                type = type.replace(chars[j], "");
+            let a = document.createElement(type);
+            if (s[0].startsWith("!"))
+                a.className = "prev";
+            if (s[0].startsWith("@"))
+                a.className = "dd";
+            a.innerHTML = s[1];
+            if (s[2])
+                for (let ar = s[2].split(","), i = 0; i < ar.length; i++)
+                    a.classList.add(ar[i]);
+            if (s[3])
+                a.setAttribute("style", s[3]);
+            dd.c[i] = a;
+            d.appendChild(a);
+            if (on)
+                on(i, a);
+        }
+    else {
+        d.innerHTML = html;
+    }
+    if (title) {
+        let t = document.createElement("div");
+        if (title.startsWith("!")) {
+            t.className = "prev";
+            title = title.substring(1, title.length);
+        }
+        t.textContent = title;
+        if (append)
+            append.appendChild(t);
+    }
+    if (append)
+        append.appendChild(d);
+    if (ops) {
+        // @ts-ignore
+        if (ops.flex) {
+            d.style.display = "flex";
+            d.style.alignItems = "center";
+        }
+        // @ts-ignore
+        if (ops.sb)
+            d.style.justifyContent = "space-between";
+    }
+    return dd;
+}
+let callIds = {};
+function clearCallouts() {
+    let l = document.getElementsByClassName("callout");
+    for (let i = 0; i < l.length; i++) {
+        let a = l[i];
+        a.parentNode.removeChild(a);
+    }
+    let l2 = Object.keys(callIds);
+    for (const key of l2) {
+        let data = callIds[l2[0]];
+        clearTimeout(data.tid);
+        delete callIds[l2[0]];
+    }
+}
+function makeCallout(a, text, id) {
+    let call;
+    function end() {
+        let tid = setTimeout(() => {
+            if (call)
+                if (call.parentNode)
+                    call.parentNode.removeChild(call);
+            delete callIds[id];
+        }, 4000 + text.length * 10);
+        callIds[id] = {
+            tid,
+            call
+        };
+    }
+    if (callIds[id]) {
+        let data = callIds[id];
+        clearTimeout(data);
+        call = data.call;
+        end();
+        return;
+    }
+    call = document.createElement("div");
+    call.className = "callout";
+    call.innerHTML = text;
+    d_menus.appendChild(call);
+    let rect = a.getBoundingClientRect();
+    let callRect = call.getBoundingClientRect();
+    call.style.left = (rect.x) + "px";
+    call.style.top = (rect.y - callRect.height - 3) + "px";
+    end();
+}
+class Menu {
+    constructor(title, w, h) {
+        let t = this;
+        t.title = title;
+        t.w = w;
+        t.h = h;
+    }
+    title;
+    w;
+    h;
+    onload(d) { }
+    open() {
+        menu.parentNode.style.display = "initial";
+        menu.style.width = this.w + "px";
+        menu.style.width = this.h + "px";
+        let title = menu.querySelector(".l_title");
+        title.textContent = this.title;
+        menu.children[1].innerHTML = "";
+        this.onload(menu.children[1]);
+    }
+}
+const ex = ["/", "\\", ":", "*", "?", '"', "|", "<", ">"];
+function isValidName(name) {
+    for (const s of ex) {
+        if (name.includes(s))
+            return false;
+    }
+    return true;
+}
+function createTable(a, cols, widths, onload = null) {
+    let tab = document.createElement("table");
+    let exp = [];
+    for (let i = 0; i < cols.length; i++) {
+        let tr = document.createElement("tr");
+        tr.style.height = "35px";
+        exp.push([]);
+        let row = cols[i];
+        for (let j = 0; j < row.length; j++) {
+            let ss = row[j].split("^");
+            let type = ss[1];
+            let s = ss[0];
+            let td = document.createElement("td");
+            if (type) {
+                let div = document.createElement(type);
+                if (type == "input")
+                    div.type = s;
+                else
+                    div.textContent = type;
+                if (onload)
+                    onload(div, j, i);
+                exp[i][j] = div;
+                td.appendChild(div);
+            }
+            else {
+                td.textContent = s;
+                exp[i][j] = td;
+            }
+            tr.appendChild(td);
+            if (j == 0)
+                if (widths[j] != null)
+                    td.style.width = widths[j] + "px";
+        }
+        tab.appendChild(tr);
+    }
+    a.appendChild(tab);
+    return exp;
+}
+class LogInMenu extends Menu {
+    constructor() {
+        super("Log In", innerWidth / 2, innerWidth / 2 * 0.75);
+    }
+    onload(d) {
+        let par = d.parentNode;
+        par.style.left = "unset";
+        par.style.right = "20px";
+        par.style.top = "40px";
+        par.style.translate = "0px 0px";
+        let tab = createTable(d, [
+            ["Username", "text^input"],
+            ["Password", "text^input"]
+        ], [
+            100
+        ]);
+        let i_username = tab[0][1];
+        let i_pass = tab[1][1];
+        let foot = EleHTML("div", [
+            "button^Confirm^^width:120px;margin-left:auto"
+        ], d, {
+            flex: true
+        });
+        foot.c[0].onclick = function () {
+            logIn(i_username.value, i_pass.value);
+        };
+    }
+}
+class SignUpMenu extends Menu {
+    constructor() {
+        super("Sign Up", innerWidth / 2, innerWidth / 2 * 0.75);
+    }
+    onload(d) {
+        let par = d.parentNode;
+        par.style.left = "unset";
+        par.style.right = "20px";
+        par.style.top = "40px";
+        par.style.translate = "0px 0px";
+        let tab = createTable(d, [
+            ["Username", "text^input"],
+            ["Display Name", "text^input"],
+            ["Password", "text^input"]
+        ], [100], (d, r, c) => {
+            if (c == 1) {
+                if (r == 0)
+                    i_username = d;
+                if (r == 1)
+                    i_displayName = d;
+                if (r == 2)
+                    i_pass = d;
+            }
+        });
+        let i_username = tab[0][1];
+        let i_displayName = tab[1][1];
+        let i_pass = tab[2][1];
+        i_username.oninput = function () {
+            if (isValidName(i_username.value)) {
+                clearCallouts();
+                i_username.classList.remove("wrong");
+            }
+            else {
+                makeCallout(i_username, "Cannot contain these symbols: [ " + ex.join(", ") + " ]", "badSymbols");
+                i_username.classList.add("wrong");
+            }
+            // let abc = "abcdefghijklmnopqrstuvwxyz0123456789_-";
+        };
+        i_pass.oninput = function () {
+        };
+        //
+        let foot = EleHTML("div", [
+            "button^Confirm^^width:120px;margin-left:auto"
+        ], d, {
+            flex: true
+        });
+        foot.c[0].onclick = function () {
+            socket.emit("createUser", i_username.value, i_displayName.value, i_pass.value, (err) => {
+                if (err) {
+                    alert("Failed to create user: " + err);
+                    return;
+                }
+                console.log("Created user successfully!");
+                closeMenu();
+            });
+        };
+    }
+}
+const menus = {
+    signUp: new SignUpMenu(),
+    logIn: new LogInMenu(),
+};
+function closeMenu() {
+    menu.parentNode.style.display = "none";
+    if (document.activeElement)
+        document.activeElement.blur();
+}
+b_closeMenu.onclick = function () {
+    closeMenu();
+};
+d_acc.children[2].onclick = function () {
+    menus.signUp.open();
+};
+d_acc.children[1].onclick = function () {
+    menus.logIn.open();
+};
+d_acc.children[0].onclick = function () {
+    logOut();
+};
+m_acc.onclick = function () {
+    loadPanel("personal");
+};
+let me = null;
+socket.on("loadUser", (userStr) => {
+    if (userStr == null) {
+        console.log("logged out successfully.");
+        me = null;
+        l_name.textContent = "No User";
+        localStorage.removeItem("usrName");
+        localStorage.removeItem("usrPass");
+        return;
+    }
+    console.log("loading user");
+    let user = JSON.parse(userStr);
+    me = user;
+    l_name.textContent = user.username;
+    console.log("USER: ", user);
+});
+function logOut() {
+    console.log("logging out...");
+    socket.emit("logOut");
+}
+function logIn(username, pass) {
+    socket.emit("logIn", username, pass, (err, id) => {
+        if (err) {
+            alert("Failed to log in: " + err);
+            return;
+        }
+        console.log("Logged in successfully!");
+        localStorage.setItem("usrName", username);
+        localStorage.setItem("usrPass", pass);
+        closeMenu();
+    });
+}
+if (localStorage.getItem("usrName") != null)
+    logIn(localStorage.getItem("usrName"), localStorage.getItem("usrPass"));
+//
+function loadPanel(id) {
+    area.innerHTML = "";
+    if (id == "personal") {
+        // l_title.textContent = title+" > Personal";
+        l_title2.textContent = " > Personal";
+        let sects = ["Files"];
+        for (let i = 0; i < sects.length; i++) {
+            let d = document.createElement("div");
+            d.textContent = sects[i];
+            let cont = document.createElement("div");
+            cont.className = "cards";
+            for (let j = 0; j < 8; j++) {
+                let card = document.createElement("div");
+                card.className = "card";
+                cont.appendChild(card);
+            }
+            area.appendChild(d);
+            area.appendChild(cont);
+            area.appendChild(document.createElement("hr"));
+        }
+    }
+}
+async function testUploadPNG() {
+    const [handle] = await showOpenFilePicker({
+        types: [
+            {
+                accept: {
+                    "image/*": [".png"]
+                },
+                description: "PNG Image"
+            }
+        ]
+    });
+    let file = await handle.getFile();
+    socket.emit("uploadPNG", file.name, await file.text());
+}
+//# sourceMappingURL=main%20-%20surface3.js.map

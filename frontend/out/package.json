@@ -1,0 +1,15 @@
+{
+  "name": "hub",
+  "version": "1.0.0",
+  "description": "",
+  "main": "backend/out/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/wicg-file-system-access": "^2020.9.5",
+    "socket.io-client": "^4.5.4"
+  }
+}

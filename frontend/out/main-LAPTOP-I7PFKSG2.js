@@ -1,0 +1,506 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const d_menus = document.getElementById("menuArea");
+const menu = document.getElementById("menu");
+const d_acc = document.getElementById("d_acc");
+const b_closeMenu = document.getElementById("b_closeMenu");
+const area = document.getElementById("area");
+const l_title = document.getElementById("l_title");
+const l_title2 = document.getElementById("l_title2");
+const l_name = document.getElementById("l_name");
+const m_acc = document.getElementById("m_acc");
+const title = "Quick Surface Hub";
+// @ts-ignore
+let socket = io();
+class OptionDiv {
+    constructor() { }
+    c = [];
+    d = null;
+}
+function EleHTML(e, html = [], append, ops = {}, on = null, title = null) {
+    let dd = new OptionDiv();
+    let d = document.createElement(e);
+    dd.d = d;
+    if (html instanceof Array)
+        for (let i = 0; i < html.length; i++) {
+            let s = html[i].split("^");
+            let chars = ["!", "@"];
+            let type = s[0];
+            for (let j = 0; j < chars.length; j++)
+                type = type.replace(chars[j], "");
+            let a = document.createElement(type);
+            if (s[0].startsWith("!"))
+                a.className = "prev";
+            if (s[0].startsWith("@"))
+                a.className = "dd";
+            a.innerHTML = s[1];
+            if (s[2])
+                for (let ar = s[2].split(","), i = 0; i < ar.length; i++)
+                    a.classList.add(ar[i]);
+            if (s[3])
+                a.setAttribute("style", s[3]);
+            dd.c[i] = a;
+            d.appendChild(a);
+            if (on)
+                on(i, a);
+        }
+    else {
+        d.innerHTML = html;
+    }
+    if (title) {
+        let t = document.createElement("div");
+        if (title.startsWith("!")) {
+            t.className = "prev";
+            title = title.substring(1, title.length);
+        }
+        t.textContent = title;
+        if (append)
+            append.appendChild(t);
+    }
+    if (append)
+        append.appendChild(d);
+    if (ops) {
+        // @ts-ignore
+        if (ops.flex) {
+            d.style.display = "flex";
+            d.style.alignItems = "center";
+        }
+        // @ts-ignore
+        if (ops.sb)
+            d.style.justifyContent = "space-between";
+    }
+    return dd;
+}
+let callIds = {};
+function clearCallouts() {
+    let l = document.getElementsByClassName("callout");
+    for (let i = 0; i < l.length; i++) {
+        let a = l[i];
+        a.parentNode.removeChild(a);
+    }
+    let l2 = Object.keys(callIds);
+    for (const key of l2) {
+        let data = callIds[l2[0]];
+        clearTimeout(data.tid);
+        delete callIds[l2[0]];
+    }
+}
+function makeCallout(a, text, id) {
+    let call;
+    function end() {
+        let tid = setTimeout(() => {
+            if (call)
+                if (call.parentNode)
+                    call.parentNode.removeChild(call);
+            delete callIds[id];
+        }, 4000 + text.length * 10);
+        callIds[id] = {
+            tid,
+            call
+        };
+    }
+    if (callIds[id]) {
+        let data = callIds[id];
+        clearTimeout(data);
+        call = data.call;
+        end();
+        return;
+    }
+    call = document.createElement("div");
+    call.className = "callout";
+    call.innerHTML = text;
+    d_menus.appendChild(call);
+    let rect = a.getBoundingClientRect();
+    let callRect = call.getBoundingClientRect();
+    call.style.left = (rect.x) + "px";
+    call.style.top = (rect.y - callRect.height - 3) + "px";
+    end();
+}
+class Menu {
+    constructor(title, w, h) {
+        let t = this;
+        t.title = title;
+        t.w = w;
+        t.h = h;
+    }
+    title;
+    w;
+    h;
+    onload(d) { }
+    open() {
+        menu.parentNode.style.display = "initial";
+        menu.style.width = this.w + "px";
+        menu.style.width = this.h + "px";
+        let title = menu.querySelector(".l_title");
+        title.textContent = this.title;
+        menu.children[1].innerHTML = "";
+        this.onload(menu.children[1]);
+    }
+}
+const ex = ["/", "\\", ":", "*", "?", '"', "|", "<", ">"];
+function isValidName(name) {
+    for (const s of ex) {
+        if (name.includes(s))
+            return false;
+    }
+    return true;
+}
+function createTable(a, cols, widths, onload = null) {
+    let tab = document.createElement("table");
+    let exp = [];
+    for (let i = 0; i < cols.length; i++) {
+        let tr = document.createElement("tr");
+        tr.style.height = "35px";
+        exp.push([]);
+        let row = cols[i];
+        for (let j = 0; j < row.length; j++) {
+            let ss = row[j].split("^");
+            let type = ss[1];
+            let s = ss[0];
+            let td = document.createElement("td");
+            if (type) {
+                let div = document.createElement(type);
+                if (type == "input")
+                    div.type = s;
+                else
+                    div.textContent = type;
+                if (onload)
+                    onload(div, j, i);
+                exp[i][j] = div;
+                td.appendChild(div);
+            }
+            else {
+                td.textContent = s;
+                exp[i][j] = td;
+            }
+            tr.appendChild(td);
+            if (j == 0)
+                if (widths[j] != null)
+                    td.style.width = widths[j] + "px";
+        }
+        tab.appendChild(tr);
+    }
+    a.appendChild(tab);
+    return exp;
+}
+class LogInMenu extends Menu {
+    constructor() {
+        super("Log In", innerWidth / 2, innerWidth / 2 * 0.75);
+    }
+    onload(d) {
+        let par = d.parentNode;
+        par.style.left = "unset";
+        par.style.right = "20px";
+        par.style.top = "40px";
+        par.style.translate = "0px 0px";
+        let tab = createTable(d, [
+            ["Username", "text^input"],
+            ["Password", "text^input"]
+        ], [
+            100
+        ]);
+        let i_username = tab[0][1];
+        let i_pass = tab[1][1];
+        let foot = EleHTML("div", [
+            "button^Confirm^^width:120px;margin-left:auto"
+        ], d, {
+            flex: true
+        });
+        foot.c[0].onclick = function () {
+            logIn(i_username.value, i_pass.value);
+        };
+    }
+}
+class SignUpMenu extends Menu {
+    constructor() {
+        super("Sign Up", innerWidth / 2, innerWidth / 2 * 0.75);
+    }
+    onload(d) {
+        let par = d.parentNode;
+        par.style.left = "unset";
+        par.style.right = "20px";
+        par.style.top = "40px";
+        par.style.translate = "0px 0px";
+        let tab = createTable(d, [
+            ["Username", "text^input"],
+            ["Display Name", "text^input"],
+            ["Password", "text^input"]
+        ], [100], (d, r, c) => {
+        });
+        let i_username = tab[0][1];
+        let i_displayName = tab[1][1];
+        let i_pass = tab[2][1];
+        i_username.oninput = function () {
+            if (isValidName(i_username.value)) {
+                clearCallouts();
+                i_username.classList.remove("wrong");
+            }
+            else {
+                makeCallout(i_username, "Cannot contain these symbols: [ " + ex.join(", ") + " ]", "badSymbols");
+                i_username.classList.add("wrong");
+            }
+            // let abc = "abcdefghijklmnopqrstuvwxyz0123456789_-";
+        };
+        i_pass.oninput = function () {
+        };
+        //
+        let foot = EleHTML("div", [
+            "button^Confirm^^width:120px;margin-left:auto"
+        ], d, {
+            flex: true
+        });
+        foot.c[0].onclick = function () {
+            socket.emit("createUser", i_username.value, i_displayName.value, i_pass.value, (err) => {
+                if (err) {
+                    alert("Failed to create user: " + err);
+                    return;
+                }
+                console.log("Created user successfully!");
+                closeMenu();
+            });
+        };
+    }
+}
+const menus = {
+    signUp: new SignUpMenu(),
+    logIn: new LogInMenu(),
+};
+function closeMenu() {
+    menu.parentNode.style.display = "none";
+    if (document.activeElement)
+        document.activeElement.blur();
+}
+b_closeMenu.onclick = function () {
+    closeMenu();
+};
+d_acc.children[2].onclick = function () {
+    menus.signUp.open();
+};
+d_acc.children[1].onclick = function () {
+    menus.logIn.open();
+};
+d_acc.children[0].onclick = function () {
+    logOut();
+};
+m_acc.onclick = function () {
+    loadPanel("personal");
+};
+let me = null;
+socket.on("loadUser", (userStr) => {
+    if (userStr == null) {
+        console.log("logged out successfully.");
+        me = null;
+        l_name.textContent = "No User";
+        localStorage.removeItem("usrName");
+        localStorage.removeItem("usrPass");
+        return;
+    }
+    console.log("loading user");
+    let user = JSON.parse(userStr);
+    me = user;
+    l_name.textContent = user.username;
+    console.log("USER: ", user);
+});
+function logOut() {
+    console.log("logging out...");
+    socket.emit("logOut");
+}
+function logIn(username, pass) {
+    socket.emit("logIn", username, pass, (err, id) => {
+        if (err) {
+            alert("Failed to log in: " + err);
+            return;
+        }
+        console.log("Logged in successfully!");
+        localStorage.setItem("usrName", username);
+        localStorage.setItem("usrPass", pass);
+        closeMenu();
+    });
+}
+if (localStorage.getItem("usrName") != null)
+    logIn(localStorage.getItem("usrName"), localStorage.getItem("usrPass"));
+//
+function loadPanel(id) {
+    area.innerHTML = "";
+    if (id == "personal") {
+        l_title2.textContent = " > Personal";
+        let sects = ["Files"];
+        for (let i = 0; i < sects.length; i++) {
+            let head = document.createElement("div");
+            head.setAttribute("style", "display:flex");
+            let d = document.createElement("div");
+            d.textContent = sects[i];
+            let cont = document.createElement("div");
+            cont.className = "cards";
+            if (false)
+                for (let j = 0; j < 8; j++) {
+                    let card = document.createElement("div");
+                    card.className = "card";
+                    cont.appendChild(card);
+                }
+            let add = document.createElement("div");
+            add.innerHTML = "<button>Upload</button>";
+            add.style.marginLeft = "auto";
+            head.appendChild(d);
+            head.appendChild(add);
+            area.appendChild(head);
+            area.appendChild(cont);
+            area.appendChild(document.createElement("hr"));
+            add.children[0].onclick = function () {
+                uploadFile();
+            };
+            socket.emit("getUserData", (data) => {
+                let user = JSON.parse(data);
+                for (let i = 0; i < user.files.length; i++) {
+                    let s = user.files[i];
+                    // let str = s.split(":");
+                    // let id:number = 0;//parseInt(str[0]);
+                    let card = document.createElement("div");
+                    card.className = "card";
+                    cont.appendChild(card);
+                    let can = document.createElement("canvas");
+                    can.className = "can";
+                    let ctx = can.getContext("2d");
+                    card.appendChild(can);
+                    socket.emit("getFile", user.username, s, (data1) => {
+                        let file = JSON.parse(data1);
+                        // console.log("Loaded: ",file.data);
+                        function loadNBG(str) {
+                            let nbg = {
+                                name: "",
+                                w: 0,
+                                h: 0,
+                                size: 0,
+                                palette: [],
+                                frames: []
+                            };
+                            let sects = str.split("@");
+                            // console.log(sects);
+                            for (let i = 0; i < sects.length; i++) {
+                                let sect = sects[i].trim();
+                                let ops = sect.split("\n");
+                                for (let j = 0; j < ops.length; j++) {
+                                    ops[j] = ops[j].trim();
+                                }
+                                if (!ops[0])
+                                    continue;
+                                if (i == 0) {
+                                    let list = ops[0].split(",");
+                                    nbg.name = list[0];
+                                    nbg.w = parseInt(list[1]);
+                                    nbg.h = parseInt(list[2]);
+                                    can.width = nbg.w;
+                                    can.height = nbg.h;
+                                    let palList = ops[2].split(",");
+                                    for (let j = 0; j < palList.length; j++) {
+                                        let col = palList[j];
+                                        let r = parseInt(col.substring(0, 2), 16);
+                                        let g = parseInt(col.substring(2, 4), 16);
+                                        let b = parseInt(col.substring(4, 6), 16);
+                                        let a = 255;
+                                        if (col.length > 6)
+                                            a = parseInt(col.substring(6, 8), 16);
+                                        nbg.palette.push([r, g, b, a]);
+                                    }
+                                    nbg.size = nbg.w * nbg.h * 4;
+                                    continue;
+                                }
+                                else if (ops[0] == "layer") {
+                                    // console.log("loading layer...");
+                                    let op1 = ops[1].split(",");
+                                    let layerI = parseInt(op1[0]);
+                                    let frameI = parseInt(op1[1]);
+                                    let name = ops[2];
+                                    let bufS = ops[3];
+                                    let buf = new Uint8ClampedArray(nbg.size);
+                                    function calcBuf() {
+                                        let blocks = bufS.split(";");
+                                        for (let j = 0; j < blocks.length; j++) {
+                                            let block = blocks[j];
+                                            let ids = block.split(":");
+                                            let cId = parseInt(ids[0]);
+                                            let col = nbg.palette[cId];
+                                            let list = ids[1].split(",");
+                                            for (let k = 0; k < list.length; k++) {
+                                                let ind36 = list[k];
+                                                let ind = parseInt(ind36, 36) * 4;
+                                                buf[ind] = col[0];
+                                                buf[ind + 1] = col[1];
+                                                buf[ind + 2] = col[2];
+                                                buf[ind + 3] = col[3];
+                                            }
+                                        }
+                                    }
+                                    calcBuf();
+                                    let visible = ops[4];
+                                    if (!nbg.frames[frameI])
+                                        nbg.frames[frameI] = {
+                                            layers: []
+                                        };
+                                    nbg.frames[frameI].layers.push({
+                                        name, visible, layerI, frameI, buf
+                                    });
+                                }
+                            }
+                            // console.log("NBG: ",nbg);
+                            //clean up
+                            // console.log("FRAMES: ",nbg.frames.length)
+                            for (let i = 0; i < nbg.frames.length; i++) {
+                                let frame = nbg.frames[i];
+                                if (!frame)
+                                    continue;
+                                // console.log("LAYERS: ",frame.layers.length);
+                                for (let j = 0; j < frame.layers.length; j++) {
+                                    let layer = frame.layers[i];
+                                    if (!layer)
+                                        continue;
+                                    // console.log("drew layer"); //temp
+                                    // console.log(nbg.size,layer.buf);
+                                    ctx.putImageData(new ImageData(layer.buf, nbg.w, nbg.h), 0, 0);
+                                }
+                            }
+                        }
+                        // card.textContent = file.name;
+                        loadNBG(file.data);
+                    });
+                }
+            });
+        }
+    }
+}
+async function testUploadPNG() {
+    const [handle] = await showOpenFilePicker({
+        types: [
+            {
+                accept: {
+                    "image/*": [".png"]
+                },
+                description: "PNG Image"
+            }
+        ]
+    });
+    let file = await handle.getFile();
+    socket.emit("uploadPNG", file.name, await file.arrayBuffer());
+}
+async function uploadFile() {
+    const [handle] = await showOpenFilePicker({
+        types: [
+            {
+                accept: {
+                    "image/*": [".nbg"]
+                },
+                description: "Nobsin Graphic"
+            }
+        ]
+    });
+    let file = await handle.getFile();
+    socket.emit("uploadFile", file.name, await file.text());
+}
+async function getFile(username, num) {
+    socket.emit("getFile", username, num, (data) => {
+        let d = JSON.parse(data);
+        console.log("RETREIVED FILE");
+        console.log(d);
+    });
+}
+//# sourceMappingURL=main.js.map
