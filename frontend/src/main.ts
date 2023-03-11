@@ -3,6 +3,8 @@ import {Account,ImgFile,User} from "../../backend/src/types";
 import type {} from "../out/node_modules/@types/wicg-file-system-access";
 // import { fromNob, NobsinCtx } from "./NE_1.3.1";
 
+let emptyStr = `{"name":"crazy good orange.nbg","data":"crazy good orange.nbg,16,16,1,00\nff0000,c99600\n@\nlayer\n0,0\nMain\n0:6b,6a,5w,5v,5h,5g,52,4n,4m,48,3s;1:69,68,5u,5t,5f,5e,50,4z,4y,4l,4k,4j,46,45,44\ntrue\n@\n","owner":"1","views":[],"likes":["1"],"title":"Crazy Good Orange","desc":"","comments":[],"id":6,"speed":8,"delay":0,"pub":false}`.replace("/\n/g","#");
+
 //correct version
 
 function preloadMatIcons(){
@@ -98,6 +100,22 @@ menu.addEventListener("mouseleave",()=>{
 
 // @ts-ignore
 let socket = io();
+// let socket = io.connect();
+// @ts-ignore
+async function testSubmitFiles(){
+    const [handle] = await showOpenFilePicker({
+        types:[
+            {
+                accept:{
+                    "image/*":[".png"]
+                },
+                description:"PNG Image"
+            }
+        ]
+    });
+    let file = await handle.getFile();
+    console.log("NAME: ",file.name);
+}
 
 class OptionDiv{
     constructor(){}
@@ -310,6 +328,8 @@ class UploadMenu extends Menu{
             ["Title","text^input"],
             ["Description","text^input"],
             ["Speed (FPS)","text^input"],
+            ["Cell Width","text^input"],
+            // ["Cell Height","text^input"],
             ["","Submit^button"]
         ],[100]);
         let fileRef:File = null;
@@ -317,20 +337,22 @@ class UploadMenu extends Menu{
         let i_title = <HTMLInputElement>tab[1][1];
         let i_desc = <HTMLInputElement>tab[2][1];
         let i_speed = <HTMLInputElement>tab[3][1];
-        let b_submit = tab[4][1];
+        let i_w = <HTMLInputElement>tab[4][1];
+        // let i_h = <HTMLInputElement>tab[5][1];
+        let b_submit = tab[5][1];
         b_upload.onclick = async function(){
             const [handle] = await showOpenFilePicker({
                 types:[
                     {
                         accept:{
-                            "image/*":[".nbg"]
+                            "image/*":[".png"]
                         },
-                        description:"Nobsin Graphic"
+                        description:"PNG Image"
                     }
                 ]
             });
             let file = await handle.getFile();
-            console.log(file);
+            // console.log(file);
             if(!file){
                 b_upload.textContent = "Upload";
                 return;
@@ -340,12 +362,65 @@ class UploadMenu extends Menu{
         };
         b_submit.onclick = async function(){
             if(Number.isNaN(parseFloat(i_speed.value))) return;
-            socket.emit("uploadFile",fileRef.name,await fileRef.text(),i_title.value,i_desc.value,{
+            let aBuf = await fileRef.arrayBuffer();
+
+            // let buf = Buffer.from(aBuf);
+            let tmp = new Blob([new Uint8Array(aBuf)]);
+            let url = URL.createObjectURL(tmp);
+            let img = new Image();
+            img.src = url;
+            let [width,height] = await new Promise<number[]>(resolve=>{
+                img.onload = function(){
+                    resolve([img.width,img.height]);
+                };
+            });
+            let frameAmt = width/parseFloat(i_w.value);
+            if(frameAmt != Math.floor(frameAmt)){
+                alert("Incorrect cell width");
+                return;
+            }
+            socket.emit("uploadSS",fileRef.name,i_w.value,height,width,height,i_title.value,i_desc.value,{
+                speed:i_speed.value
+            },await fileRef.arrayBuffer(),async (fileId:string)=>{
+                if(fileId == null){
+                    alert("Error while uploading file");
+                    return;
+                }
+                console.log("UPLOADED WITH ID: ",fileId);
+                loadFile(fileId,area.children[1]);
+                /*let fileData = await new Promise<string>(resolve=>{
+                    socket.emit("getFile",fileId,0,str=>{
+                        // console.log("STR: ",str);
+                        resolve(str);
+                    });
+                });
+                console.log(fileData);
+                addFile(makeFile(fileData));*/
+            });
+            
+            /*socket.emit("uploadFile",fileRef.name,await fileRef.text(),i_title.value,i_desc.value,{
                 speed:i_speed.value
             },(data:string)=>{
                 let dat:ImgFile = JSON.parse(data);
                 addFile(dat,null);
-            });
+            });*/
+            /*const maxChunkLen = 120000; //20000
+            let text = await fileRef.text();
+            let amt = Math.ceil(text.length/maxChunkLen);
+            
+            socket.emit("initUploadFile",fileRef.name,amt,i_title.value,i_desc.value,{
+                speed:i_speed.value
+            },(fileId:number)=>{
+                for(let i = 0; i < amt; i++){
+                    socket.emit("uploadFile2",fileId,i,text.substring(i*maxChunkLen,(i+1)*maxChunkLen),(data:string)=>{
+                        // let dat:ImgFile = JSON.parse(data);
+                        // addFile(dat,null);
+                        // console.log("FINISHED UPLOADING FILE",data);
+                        let dat = JSON.parse(data);
+                        addFile(dat,null);
+                    });
+                }
+            });*/
             closeMenu();
         };
     }
@@ -572,6 +647,13 @@ function getPropAsync(username:string,prop:string){
         });
     });
 }
+function getFilePropAsync(fileId:string,prop:string){
+    return new Promise<any>(resolve=>{
+        socket.emit("getFileProps",fileId,prop,(data:any)=>{
+            resolve(data);
+        });
+    });
+}
 
 interface CaretDiv extends HTMLDivElement{
     open:boolean;
@@ -583,9 +665,59 @@ let largeCard:CardDiv = null;
 area.onclick = function(){
     if(hoverCard) return;
     if(!largeCard) return;
+    largeCard.speed = largeCard.ref.speed/60;
+    largeCard.pause = false;
     largeCard.classList.remove("large");
     largeCard = null;
+    syncCards();
 };
+
+function makeFile(str:string){
+    // console.log("MAKE FILE:",str);
+    let obj = JSON.parse(str);
+    return <ImgFile>obj;
+    /*console.log("OBJ: ",obj);
+    // let file = new ImgFile(null,null,null);
+    let file = {};
+    let ok = Object.keys(obj);
+    for(const key of ok){
+        if(ok[key]) file[key] = obj[key];
+    }
+    return <ImgFile>file;*/
+}
+
+async function loadFile(s:string,cont){
+    s = s.toString();
+    
+    let file = [];
+    let amt = await getFilePropAsync(s,"sect");
+    for(let j = 0; j < amt; j++){
+        file[j] = await new Promise<string>(resolve=>{
+            socket.emit("getFile",s,j,str=>{
+                resolve(str);
+            });
+        });
+    }
+    
+    let div = await addFile(makeFile(file.join("")),cont);
+    setTimeout(async function(){
+        let buf = await new Promise<Buffer>(resolve=>{
+            socket.emit("getSS",s,(data:Buffer)=>{
+                resolve(data);
+            });
+        });
+        let blob = new Blob([new Uint8Array(buf)]);
+        let url = URL.createObjectURL(blob);
+        let img = new Image(div.ref.w,div.ref.h);
+        img.src = url;
+        img.onload = function(){
+            div.update();
+        };
+        div.ref.img = img;
+
+        // syncCards();
+    },0);
+}
 
 async function loadPanel(id:string,data2:string){
     area.innerHTML = "";
@@ -671,23 +803,23 @@ async function loadPanel(id:string,data2:string){
                 if(car.open) car.classList.add("open");
                 else car.classList.remove("open");
                 if(car.open){
-                    if(type == "allFiles"){
-                        let filesStr = await getPropAsync(username,"allFiles");
+                    //loadFile
+                    async function loadFileSect(filesStr:string){
                         user.files = JSON.parse(filesStr);
                         for(let i = 0; i < user.files.length; i++){
                             let s = user.files[i];
-                            // console.log("GET: ","["+s+"]");
-                            let file:ImgFile = await new Promise<ImgFile>((resolve,reject)=>{
-                                socket.emit("getFile",user.uid,s,(data1:string)=>{
-                                    let file:ImgFile = JSON.parse(data1);
-                                    resolve(file);
-                                });
-                            });
-                            addFile(file,null);
+                            await loadFile(s,cont);
                         }
                     }
+                    if(type == "allFiles"){
+                        let filesStr = await getPropAsync(username,"allFiles");
+                        console.log("FSTR",filesStr);
+                        await loadFileSect(filesStr);
+                    }
                     else if(type == "likes"){
-                        let likesStr:string = await getPropAsync(username,"likes");
+                        let filesStr:string = await getPropAsync(username,"likes");
+                        await loadFileSect(filesStr);
+                        /*let likesStr:string = await getPropAsync(username,"likes");
                         let likes = JSON.parse(likesStr);
                         if(!likes){
                             
@@ -700,10 +832,12 @@ async function loadPanel(id:string,data2:string){
                                 });
                             });
                             addFile(file,cont);
-                        }
+                        }*/
                     }
                     else if(type == "pub"){
-                        let l:string[] = await getPropAsync(username,"pub");
+                        let files = await getPropAsync(username,"pub");
+                        await loadFileSect(JSON.stringify(files));
+                        /*let l:string[] = await getPropAsync(username,"pub");
                         for(let i = 0; i < l.length; i++){
                             let file:ImgFile = await new Promise<ImgFile>(resolve=>{
                                 socket.emit("getFile",user.uid,l[i],(data1:string)=>{
@@ -712,7 +846,7 @@ async function loadPanel(id:string,data2:string){
                                 });
                             });
                             addFile(file,cont);
-                        }
+                        }*/
                     }
                     else if(type == "coll"){
                         console.log("loaded coll: ",atr);
@@ -759,6 +893,18 @@ async function testUploadPNG(){
     let file = await handle.getFile();
     socket.emit("uploadPNG",file.name,await file.arrayBuffer());
 }
+function testGetPNG(){
+    let start = performance.now();
+    socket.emit("getPNG","",(buf:Buffer)=>{
+        console.log("GOT BUFFER");
+        let blob = new Blob([new Uint8Array(buf)]);
+        let url = URL.createObjectURL(blob);
+        let img = new Image(256,256);
+        img.src = url;
+        document.body.appendChild(img);
+        console.log("ADDED in ",performance.now()-start);
+    });
+}
 function getNames(uid:string){
     return new Promise<string[]>(resolve=>{
         socket.emit("getNames",uid,(un:string,n:string)=>{
@@ -767,31 +913,59 @@ function getNames(uid:string){
     });
 }
 
-async function addFile(file:ImgFile,par:HTMLElement,scale=1){
+function syncCards(){
+    let list = document.querySelectorAll<CardDiv>(".card");
+    for(let j = 0; j < list.length; j++){
+        let card = list[j];
+        for(let i = j+1; i < list.length; i++){
+            let a = list[i];
+            if(a.ref.id == card.ref.id){
+                card.ref = a.ref;
+                card.speed = a.speed;
+                card.frame = a.frame;
+                a.i = 0;
+                card.i = a.i;
+                break;
+            }
+        }
+    }
+}
+
+async function addFile(file:ImgFile,par:HTMLElement=null,scale=1){
+    // console.log("FILE",file);
     let card:CardDiv = <CardDiv>document.createElement("div");
     card.i = 1;
     card.frame = 0;
     card.speed = file.speed/60;
     card.pause = false;
     card.className = "card";
+
     let cont = document.getElementById("cardCont");
     if(!par) par = cont;
     if(par.previousElementSibling.children[0].classList.contains("open")) par.appendChild(card);
     let can = document.createElement("canvas");
     can.className = "can";
+    can.style.aspectRatio = (file.w/file.h).toString();
+    let rat = file.w/file.h;
+    can.style.width = (rat*100)+"%";
+    // can.style.width = (Math.min(130,130*rat))+"px";
+    if(rat > 1){
+        can.style.marginTop = `${100-1/rat*100}%`;
+        can.style.translate = `0px -${100-1/rat*100}%`;
+        can.style.height = "initial";
+    }
+    else if(rat < 1){
+        can.style.marginLeft = `${rat*100}%`;
+        can.style.translate = `-${rat*100}% 0px`;
+        can.style.height = "100%";
+    }
     let ctx = can.getContext("2d");
-    card.appendChild(can);
+    let canCont = document.createElement("div");
+    canCont.className = "canCont";
+    canCont.appendChild(can);
+    card.appendChild(canCont);
     let ops = document.createElement("div");
     ops.className = "ops";
-    can.onclick = function(){
-        if(largeCard){
-            largeCard.classList.remove("large");
-            largeCard = null;
-        }
-        card.classList.add("large");
-        largeCard = card;
-        socket.emit("clickFile",file.id);
-    };
     card.onmouseenter = function(){
         hoverCard = card;
         lastHoverCard = card;
@@ -872,12 +1046,22 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
     //
     let filenameS = file.name.split(".");
     filenameS.pop();
-    let filename = filenameS.join(".");
-    let [fileUUN,fileUN] = await getNames(file.owner);
-    let prop2 = EleHTML("div",[
+    // let filename = filenameS.join(".");
+    // let [fileUUN,fileUN] = await getNames(file.owner);
+    getNames(file.owner).then(([fileUUN,fileUN])=>{
+        // console.log(fileUUN,fileUN);
+        prop2.c[1].children[0].textContent = "- "+fileUN+" ";
+        prop2.c[1].children[1].textContent = "("+fileUUN+")";
+    });
+    /*let prop2 = EleHTML("div",[
         `div^${file.title||filename}^^font-size:14px;margin-bottom:5px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden`,
         `div^- ${fileUN} <span class="prev">(${fileUUN})</span>^prev^font-size:12px;margin-bottom:0px`,
+    ],props);*/
+    let prop2 = EleHTML("div",[
+        `div^-- . --^^font-size:14px;margin-bottom:5px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden`,
+        `div^<span>- -- . -- </span><span class="prev">(-.-)</span>^prev^font-size:12px;margin-bottom:0px`,
     ],props);
+    prop2.c[0].textContent = file.title || file.name;
     prop1.d.parentElement.appendChild(prop1.d);
     // props.appendChild(document.createElement("hr"));
     //
@@ -915,6 +1099,20 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
         if(me) socket.emit("likeImage",file.owner,file.id);
     };
 
+    canCont.onclick = function(){
+        if(largeCard){
+            largeCard.speed = largeCard.ref.speed/60;
+            largeCard.pause = false;
+            largeCard.classList.remove("large");
+            largeCard = null;
+            syncCards();
+        }
+        card.classList.add("large");
+        ct_speed.value = (card.speed*60).toString();
+        largeCard = card;
+        socket.emit("clickFile",file.id);
+    };
+
     function loadNBG(str:string,frameI:number=0){
         let nbg = {
             name:"",
@@ -942,6 +1140,7 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
                 nbg.h = parseInt(list[2]);
                 can.width = nbg.w;
                 can.height = nbg.h;
+                // console.log(ops);
                 let palList = ops[2].split(",");
                 for(let j = 0; j < palList.length; j++){
                     let col = palList[j];
@@ -1019,10 +1218,19 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
     }
     
     // card.textContent = file.name;
-    let img = loadNBG(file.data);
+    ///////// let img = loadNBG(file.data);
     card.update = function(){
-        // console.log("render");
-        loadNBG(file.data,card.frame);
+        if(!card.ref.img) return;
+        let ref = card.ref;
+        can.width = ref.w;
+        can.height = ref.h;
+        let x = ref.w*card.frame;
+        ctx.drawImage(card.ref.img,x,0,ref.w,ref.h,0,0,ref.w,ref.h);
+        // card.appendChild(card.ref.img);
+
+        // loadNBG(file.data,card.frame);
+        // console.log("UPDATE CALLED");
+        ///////// loadNBG(card.ref.data,card.frame);
     };
 
     //
@@ -1058,7 +1266,8 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
     ct_range.type = "range";
     ct_range.step = "1";
     ct_range.min = "0";
-    ct_range.max = (img.frames.length-1).toString();
+    ct_range.max = (card.ref.frameAmt-1).toString();
+    // ct_range.max = (img.frames.length-1).toString();
     ct_range.style.width = "100px";
     (<HTMLElement>ct_range.nextElementSibling).style.width = "25px";
     let wasPaused = false;
@@ -1075,6 +1284,10 @@ async function addFile(file:ImgFile,par:HTMLElement,scale=1){
         card.frame = parseInt(ct_range.value);
         ct_range.nextElementSibling.textContent = (card.frame+1).toString();
     };
+
+    syncCards();
+
+    return card;
 }
 async function uploadFile(){
     menus.upload.open();
@@ -1129,10 +1342,12 @@ function updateImage(d:CardDiv,file:ImgFile){
         if(file.likes.includes(me.uid)) like.children[1].classList.add("fill");
         else like.children[1].classList.remove("fill");
     }
+    let img = d.ref.img;
     d.ref = file;
+    d.ref.img = img;
     d.speed = file.speed/60;
     (<HTMLInputElement>prop1.nextElementSibling.nextElementSibling.children[1].children[0]).value = file.speed.toString();
-    prop1.previousElementSibling.children[0].textContent = d.ref.title;
+    prop1.previousElementSibling.children[0].textContent = d.ref.title||d.ref.name;
     prop1.nextElementSibling.children[0].textContent = d.ref.desc;
 }
 function removeFile(uid:string,fileId:number){
@@ -1152,8 +1367,8 @@ function update(){
     for(let i = 0; i < l.length; i++){
         let a = l[i];
         if(!a) continue;
-        if(!a.dat) continue;
-        if(a.dat.frames.length <= 1) continue;
+        if(a.ref.frameAmt <= 1) continue;
+        // if(a.dat.frames.length <= 1) continue;
         // a.i += a.speed;
         // a.frame = Math.floor(a.i);
         if(!a.pause){
@@ -1163,17 +1378,81 @@ function update(){
                 a.slideRef.value = a.frame.toString();
                 a.slideRef.nextElementSibling.textContent = (a.frame+1).toString();
                 a.frame--;
-                if(a.frame < 0) a.frame = a.dat.frames.length-1;
+                if(a.frame < 0) a.frame = a.ref.frameAmt-1;
             }
             if(a.i <= 0){
                 a.i = 1;
                 a.slideRef.value = a.frame.toString();
                 a.slideRef.nextElementSibling.textContent = (a.frame+1).toString();
                 a.frame++;
-                if(a.frame >= a.dat.frames.length) a.frame = 0;
+                if(a.frame >= a.ref.frameAmt) a.frame = 0;
             }
         }
         a.update();
     }
 }
 update();
+
+////////
+
+// LZW-compress a string
+function lzw_encode(s) {
+    var dict = {};
+    var data = (s + "").split("");
+    var out = [];
+    var currChar;
+    var phrase = data[0];
+    var code = 256;
+    for (var i=1; i<data.length; i++) {
+        currChar=data[i];
+        if (dict[phrase + currChar] != null) {
+            phrase += currChar;
+        }
+        else {
+            out.push(phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0));
+            dict[phrase + currChar] = code;
+            code++;
+            phrase=currChar;
+        }
+    }
+    out.push(phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0));
+    for (var i=0; i<out.length; i++) {
+        out[i] = String.fromCharCode(out[i]);
+    }
+    return out.join("");
+}
+
+// Decompress an LZW-encoded string
+function lzw_decode(s) {
+    var dict = {};
+    var data = (s + "").split("");
+    var currChar = data[0];
+    var oldPhrase = currChar;
+    var out = [currChar];
+    var code = 256;
+    var phrase;
+    for (var i=1; i<data.length; i++) {
+        var currCode = data[i].charCodeAt(0);
+        if (currCode < 256) {
+            phrase = data[i];
+        }
+        else {
+           phrase = dict[currCode] ? dict[currCode] : (oldPhrase + currChar);
+        }
+        out.push(phrase);
+        currChar = phrase.charAt(0);
+        dict[code] = oldPhrase + currChar;
+        code++;
+        oldPhrase = phrase;
+    }
+    return out.join("");
+}
+
+async function testGetFile(){
+    let start = performance.now();
+    let h = await fetch("Lightsaber.nbg");
+    let text = await h.text();
+    // console.log("LOADED FILE: ",text);
+    console.log("LOAD TIME: ",performance.now()-start);
+}
+// testGetFile();

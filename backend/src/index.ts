@@ -8,6 +8,23 @@ import http = require("http");
 import socket = require("socket.io");
 import readline = require("readline");
 import { stdin as input, stdout as output } from 'node:process';
+/*import sevenBin = require("7zip-bin");
+import Seven from "node-7z";
+const sZ = sevenBin.path7za;
+
+const myStream = Seven.add("Files.7z","files/22.json",{
+    $bin:sZ,
+    
+});
+try{
+    Seven.extract("Files.7z","output",{
+        $bin:sZ
+    });
+}
+catch(e){
+    console.log("failed",e);
+}*/
+
 const rl = readline.createInterface({ input, output });
 
 // import siofu = require("socketio-file-upload");
@@ -16,10 +33,9 @@ const server = http.createServer(app);
 const io = new socket.Server(server);
 
 // app.use(siofu.router);
+// const path = "../../frontend/out";
+
 app.use(express.static("../../frontend/out"));
-/*app.get("../",(req,res)=>{
-    res.send("<h1>Hello world</h1>");
-});*/
 
 class Collection{
     constructor(name:string,desc:string,arr:string[],pub:boolean){
@@ -113,8 +129,32 @@ class ImgFile{
     speed = 8;
     delay = 0;
     pub = false;
+    w = 0;
+    h = 0;
+    type:string = null;
+    frameAmt = 0;
+    cw = 0;
+    ch = 0;
     save(){
         let t = this;
+        let data = t.data;
+
+        /*let comma = data?.split(",");
+        if(comma){
+            if(comma[1]){
+                t.w = parseInt(comma[1]);
+                t.h = parseInt(comma[2]);
+            }
+        }*/
+
+        /*fs.writeFile(path+"/files/"+this.id+".nbg",data,{encoding:"utf8"},(err)=>{
+            if(err){
+                console.log("ERR: saving file",err);
+            }
+        });
+        
+        t.data = "";*/
+        // fs.writeFile(`filedata/${this.id}.`)
         fs.writeFile(`files/${this.id}.json`,JSON.stringify(this),{encoding:"utf8"},(err)=>{
             if(err){
                 console.log("Err: saving imgFile: ",t.name);
@@ -139,7 +179,7 @@ class Core{
         let tmp = core.usersName;
         core.usersName = null;
         let str = JSON.stringify(this);
-        console.log(str);
+        // console.log(str);
         fs.writeFile("users/all.json",str,{encoding:"utf8"},(err)=>{
             if(err){
                 console.log("ERR: Failed to save users");
@@ -229,7 +269,31 @@ function readUsers(){
 
 init();
 
+const maxChunkLen = 120000; //20000
+
+let tempUpload = {};
+
 io.on("connection",socket=>{
+    // let uploader = new siofu();
+    // uploader.dir = "/testuploads";
+    // uploader.listen(socket);
+
+    socket.on("uploadPNG",(name:string,buf:ArrayBuffer)=>{
+        console.log("UPLOADED PNG");
+        fs.writeFile("filedata/test.png",Buffer.from(buf),{encoding:"utf8"},(err)=>{
+            if(err) console.log("ERR: saving png file",err);
+        });
+    });
+    socket.on("getPNG",(name:string,call:(b:Buffer)=>void)=>{
+        fs.readFile("filedata/test.png",(err,data)=>{
+            if(err){
+                console.log("ERR: reading png file",err);
+                return;
+            }
+            call(data);
+        });
+    });
+
     socket.on("msg",txt=>{
         console.log("MSG: ",txt);
     });
@@ -341,6 +405,8 @@ io.on("connection",socket=>{
         });
     }
     socket.on("updateFile",async (data:ImgFile)=>{
+        // console.log("UPLOAD FILE:");
+        // console.log(data);
         if(!data) return;
         if(typeof data != "object") return;
         let uid = sockets.get(socket.id);
@@ -359,13 +425,129 @@ io.on("connection",socket=>{
                 resolve(f);
             });
         });
+        if(file.owner != uid) return;
         file.title = data.title;
         file.desc = data.desc;
         file.speed = parseFloat(data.speed.toString());
         file.save();
         socket.emit("updateImage",uid,fileId,JSON.stringify(file));
     });
+    socket.on("initUploadFile",async (name:string,amt:number,title:string,desc:string,atr:any,call:(fileId:number)=>void)=>{
+        if(!call) return;
+        let uid = sockets.get(socket.id);
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        core.fileAmt++;
+        let fileId = core.fileAmt;
+        user.files.push(fileId.toString());
+        user.fileNum++;
+        user.save();
+        let file = new ImgFile(name,"",user.uid);
+        file.title = title;
+        file.desc = desc;
+        file.speed = atr.speed;
+        file.id = fileId;
+        core.save();
+        file.save();
+        tempUpload[fileId] = {
+            ar:[],
+            amt,
+            ref:file
+        };
+        // console.log("INIT UPLOAD OF: ",name," from user ",user.name);
+        call(fileId);
+    });
+    socket.on("uploadFile2",async (fileId:number,i:number,data:string,finish:(data:string)=>void)=>{
+        if(fileId == null) return;
+        if(i == null) return;
+        
+        let ref = tempUpload[fileId];
+        if(!ref){
+            console.log("ERR: couldn't find tempUpload of file: ",fileId);
+            return;
+        }
+
+        ref.ar[i] = data;
+        ref.amt--;
+        if(ref.amt <= 0){
+            let file = (<ImgFile>ref.ref);
+            let str = ref.ar.join("");
+            file.data = str;
+            file.save();
+            finish(JSON.stringify(file));
+            delete tempUpload[fileId];
+            // console.log("FINISHED UPLOADING: ",fileId,ref.ref.name,str);
+        }
+    });
+    socket.on("uploadSS",async (name:string,w:any,h:any,cw:any,ch:any,title:string,desc:string,atr:any,bufData:ArrayBuffer,call:(fileId:number)=>void)=>{
+        w = parseInt(w);
+        h = parseInt(h);
+        cw = parseInt(cw);
+        ch = parseInt(ch);
+        atr.speed = parseInt(atr.speed);
+        // console.log("UPLOADED PNG");
+        // fs.writeFile("filedata/test.png",Buffer.from(buf),{encoding:"utf8"},(err)=>{
+            // if(err) console.log("ERR: saving png file",err);
+        // });
+        // console.log("UPLOAD SS");
+        if(!call) return;
+        let uid = sockets.get(socket.id);
+        if(!uid) return;
+        let user = await getUser(uid);
+        if(!user) return;
+        core.fileAmt++;
+        let fileId = core.fileAmt;
+        user.files.push(fileId.toString());
+        user.fileNum++;
+        user.save();
+        let file = new ImgFile(name,"",user.uid);
+        file.title = title;
+        file.desc = desc;
+        file.speed = atr.speed;
+        file.id = fileId;
+        file.type = "ss";
+        file.w = w;
+        file.h = h;
+        file.cw = cw;
+        file.ch = ch;
+        file.frameAmt = Math.floor(cw/w);
+        core.save();
+        file.save();
+        let buf = Buffer.from(bufData);
+        fs.writeFile("filedata/"+fileId+".png",buf,{encoding:"utf8"},(err)=>{
+            if(err){
+                console.log("ERR: uploading ss");
+                call(null);
+                return;
+            }
+            call(fileId);
+            console.log("UPLOADED SS successfully");
+        });
+    });
+    socket.on("getSS",async (fileId:string,call:(data:Buffer)=>void)=>{
+        if(!call) return;
+        if(fileId == null) return;
+        if(typeof fileId != "string") return;
+
+        let file = await new Promise<Buffer>(resolve=>{
+            fs.readFile("filedata/"+fileId+".png",(err,data)=>{
+                if(err){
+                    console.log("ERR: reading file",err);
+                    resolve(null);
+                }
+                resolve(data);
+            });
+        });
+        if(!file){
+            call(null);
+            return;
+        }
+        call(file);
+    });
     socket.on("uploadFile",async (name:string,data:string,title:string,desc:string,atr:any,call:(data:string)=>void)=>{
+        console.log("DON'T use upload file anymore");
+        return;
         if(!call) return;
         let uid = sockets.get(socket.id);
         if(!uid) return;
@@ -407,12 +589,54 @@ io.on("connection",socket=>{
 
         getFileData(uid,fileName,call);
     });
-    socket.on("getFile",async (uid:string,fileId:string,call:(data:string)=>void)=>{
+    socket.on("getFileData",async (fileId:string,sect:number,call:(data:string)=>void)=>{
         if(!call) return;
+        if(fileId == null) return;
+        if(typeof fileId != "string") return;
+        if(sect == null) return;
+        if(typeof sect != "number") return;
+        if(sect != Math.floor(sect)) return;
+
+        let file = await getFile(fileId);
+        if(!file){
+            call(null);
+            return;
+        }
+
+        let str = JSON.stringify(file.data); //to-do need to make it so it doesn't read in the whole list of likes too, that only should be stored on the server and sent on specific request
+
+        let num = Math.ceil(str.length/maxChunkLen);
+        if(sect >= num){
+            call(null);
+            console.log("SECT OUT OF BOUNDS: ",sect,num);
+            return;
+        }
+
+        let text = str.substring(sect*maxChunkLen,(sect+1)*maxChunkLen);
+        call(text);
+    });
+    socket.on("getFile",async (fileId:string,sect:number,call:(data:string)=>void)=>{
+        if(!call) return;
+        if(fileId == null) return;
+        if(typeof fileId != "string") return;
         // let name = sockets.get(socket.id);
         // let user = await getUser(name);
 
-        getFileData(uid,fileId,call);
+        let file = await getFile(fileId);
+        // console.log(file);
+        if(!file){
+            call(null);
+            return;
+        }
+        file.data = "";
+
+        let str = JSON.stringify(file); //to-do need to make it so it doesn't read in the whole list of likes too, that only should be stored on the server and sent on specific request
+
+        let text = str.substring(sect*maxChunkLen,(sect+1)*maxChunkLen);
+        // call(str);
+        call(text);
+        
+        // getFileData(uid,fileId,call);
     });
     socket.on("getUserData",async (username:string,load:(data:string)=>void)=>{
         if(!username) return;
@@ -556,6 +780,7 @@ io.on("connection",socket=>{
             return;
         }
         if(prop == "likes"){
+            console.log("TEST: ",(user.publicLikes || suid == user.uid));
             if(user.publicLikes || suid == user.uid) call(true);
             else call(false);
         }
@@ -574,7 +799,15 @@ io.on("connection",socket=>{
         let file = await getFile(fileId);
         if(prop == "pub"){
             call(file.pub);
-            return;
+        }
+        else if(prop == "sect"){
+            let file = await getFile(fileId);
+            if(!file){
+                call(null);
+                return;
+            }
+            let num = Math.ceil(JSON.stringify(file).length/maxChunkLen);
+            call(num);
         }
     });
     socket.on("getUserProps",async (username,prop,call:(val:any)=>void)=>{

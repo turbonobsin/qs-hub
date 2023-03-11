@@ -16,6 +16,13 @@ declare class ImgFile{
     speed:number;
     delay:number;
     pub:boolean;
+    w:number;
+    h:number;
+    type:string;
+    img:HTMLImageElement;
+    frameAmt:number;
+    cw:number;
+    ch:number;
     save();
 }
 

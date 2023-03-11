@@ -98,6 +98,7 @@ body{
 .card{
     /* width:150px; */
     width:130px;
+    /* width:fit-content; */
     /* height:150px; */
     border:solid 1px var(--titleB);
     border-radius:7px;
@@ -117,21 +118,64 @@ body{
 }
 .card.large{
     position: absolute;
-    margin-left: 25%;
+    margin-left: 20%;
+    margin-right: 20%;
     width: -webkit-fill-available;
-    margin-right: 25%;
     z-index: 4;
     /* top: 60px; */
     display:flex;
     gap:5px;
+    justify-content:space-between;
     translate:0px -12.5%;
+}
+@media (max-width: 1200px) {
+    .card.large{
+        position: absolute;
+        margin-left: 5%;
+        margin-right: 5%;
+        width: -webkit-fill-available;
+        z-index: 4;
+        /* top: 60px; */
+        display:flex;
+        gap:5px;
+        justify-content:space-between;
+        translate:0px -12.5%;
+    }
+}
+
+.card.large > div:first-child{
+    /* margin:auto; */
+    width:50%;
+    height:100%;
+}
+.card.large canvas{
+    /* width:100% !important; */
+    /* height:minmax(100%,intial) !important; */
+}
+.card .canCont{
+    display:flex;
+    aspect-ratio:1;
+    cursor:pointer;
+}
+.card.large .canCont{
+    width:130px;
+    height:130px;
+}
+.card canvas{
+    margin:auto;
+    /* margin-top:initial !important; */
+    /* margin-left:initial !important; */
+    /* translate:initial !important; */
+    /* aspect-ratio:initial !important; */
+    /* margin-left:50%; */
+    /* margin-top:50%; */
+    /* translate:-50% -50%; */
 }
 canvas.can{
     width:100%;
     border-radius:5px;
     image-rendering:pixelated;
     background-color:rgba(0,0,0,0.05);
-    cursor:pointer;
 }
 .large .can{
     width:50%;
